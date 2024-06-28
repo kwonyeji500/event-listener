@@ -32,6 +32,95 @@
 
 비동기 처리와 이벤트 기반 설계를 통해 서버의 처리 효율성을 높였습니다. API 서버는 계약서 생성 요청을 빠르게 처리하고, 이메일 및 SMS 전송은 별도의 비동기 작업으로 처리하여 서버 자원을 효율적으로 관리할 수 있게 되었습니다.
 
+## 코드 예시
+### 1. 계약서 생성 API
+   ```java
+@RestController
+@RequiredArgsConstructor
+public class ContractController {
+    private final ContractService contractService;
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.OK)
+    public CommonResult createContract(@AuthenticationPrincipal User user) {
+
+        contractService.createContract(ContractFirstCreateCommand.create(user));
+
+        return responseService.getSuccessResult();
+    }
+}
+```
+### 2. 계약서 서비스
+   ```java
+@Service
+@RequiredArgsConstructor
+public class ContractService {
+    private final ContractRepository contractRepository;
+    private final ApplicationEventPublisher eventPublisher;
+
+    public void createContract(ContractFirstCreateCommand command) {
+        User user = command.getUser();
+
+        Contract contract = contractRepository.save(Contract.create(user));
+
+        ContractCreatedEvent event = new ContractCreatedEvent(
+                user.getEmail(),
+                user.getPhoneNum(),
+                user.getContractRecipient(),
+                contract.getUrl(),
+                contract.getStatus());
+        eventPublisher.publishEvent(event);
+    }
+}
+   ```
+### 3. 계약서 생성 이벤트
+   ```java
+@Getter
+@AllArgsConstructor
+public class ContractCreatedEvent {
+    private final String email;
+    private final String phoneNum;
+    private final String recipientName;
+    private final String contractUrl;
+    private final String contractStatus;
+}
+   ```
+### 4. SES 이메일 리스너
+   ```java
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class SesSenderListener {
+    private final SesSenderService sesSenderService;
+
+    @Async
+    @EventListener
+    public void handleContractCreatedEvent(ContractCreatedEvent event) {
+        log.info("[SesSenderListener] handleContractCreatedEvent - Sending SES email");
+        SesDto sesDto = new SesDto(event.getEmail(), "Contract Created", "Your contract has been created.", event.getContractUrl(), event.getContractStatus());
+        sesSenderService.send(sesDto);
+    }
+}
+   ```
+### 5. SMS 전송 리스너
+   ```java
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class SmsSenderListener {
+
+    private final MessageSendService messageSendService;
+
+    @Async
+    @EventListener
+    public void handleContractCreatedEvent(ContractCreatedEvent event) {
+        log.info("[SmsSenderListener] handleContractCreatedEvent - Sending SMS");
+        SMSPerDto smsDto = SMSPerDto.builder().trPhone(event.getPhoneNum()).build();
+        messageSendService.sendSMSPer(smsDto);
+    }
+}
+   ```
+
 
 ## 결론
 
